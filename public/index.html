@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>HomeMatch AI</title>
+  <meta name="description" content="AI-powered real estate recommendations that explain why each home fits you.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%234f46e5'/%3E%3Cpath d='M7 16 16 8l9 8v9H7z' fill='%23fff'/%3E%3Cpath d='M14 25v-6h4v6' fill='%234f46e5'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 32 32"><path d="M7 16 16 8l9 8v9H7z" fill="currentColor"/><path d="M14 25v-6h4v6" fill="var(--brand)"/></svg>
+      </span>
+      HomeMatch <span class="brand-ai">AI</span>
+    </a>
+    <nav class="tabs" aria-label="Views">
+      <button class="tab is-active" data-view="results" type="button">Matches</button>
+      <button class="tab" data-view="saved" type="button">Saved <span id="saved-count" class="count">0</span></button>
+    </nav>
+    <span id="ai-status" class="ai-status" title="AI status"><span class="dot"></span><span class="label">Connecting…</span></span>
+  </header>
+
+  <section class="hero">
+    <div class="hero-inner">
+      <h1>Find a home that fits your life.</h1>
+      <p class="lede">Describe what you want in plain English. HomeMatch AI turns it into a search, ranks the best homes for you and explains every match.</p>
+      <form id="ai-search" class="ai-search" autocomplete="off">
+        <svg class="sparkle" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l1.9 5.6L19.5 9.5l-5.6 1.9L12 17l-1.9-5.6L4.5 9.5l5.6-1.9zM19 15l.9 2.6 2.6.9-2.6.9L19 22l-.9-2.6-2.6-.9 2.6-.9z" fill="currentColor"/></svg>
+        <label for="ai-query" class="sr-only">Describe your ideal home</label>
+        <input id="ai-query" name="query" maxlength="500" placeholder="e.g. 3-bed house in Austin under $650k with a yard and good schools">
+        <button class="btn btn-primary" type="submit">Find matches</button>
+      </form>
+      <div class="examples" aria-label="Example searches">
+        <button class="example" type="button">Walkable condo in Seattle under $600k</button>
+        <button class="example" type="button">Family home in Raleigh with great schools and a big yard</button>
+        <button class="example" type="button">House with a pool in Phoenix, 4 beds, under $550k, I work from home</button>
+        <button class="example" type="button">Pet-friendly place near downtown Denver with a short commute</button>
+      </div>
+    </div>
+  </section>
+
+  <main class="layout">
+    <details id="filters" class="filters card" open>
+      <summary><h2>Your preferences</h2><span class="summary-hint">Fine-tune the search</span></summary>
+      <form id="prefs-form">
+        <label class="field">
+          <span>City</span>
+          <select name="city"><option value="">Any city</option></select>
+        </label>
+
+        <div class="field-row">
+          <label class="field">
+            <span>Min price</span>
+            <input name="minPrice" type="number" min="0" step="10000" inputmode="numeric" placeholder="No min">
+          </label>
+          <label class="field">
+            <span>Max price</span>
+            <input name="maxPrice" type="number" min="0" step="10000" inputmode="numeric" placeholder="No max">
+          </label>
+        </div>
+
+        <fieldset class="field">
+          <legend>Property type</legend>
+          <div class="chips" id="type-chips"></div>
+        </fieldset>
+
+        <div class="field-row">
+          <label class="field">
+            <span>Bedrooms</span>
+            <select name="minBeds">
+              <option value="0">Any</option>
+              <option value="1">1+</option>
+              <option value="2">2+</option>
+              <option value="3">3+</option>
+              <option value="4">4+</option>
+              <option value="5">5+</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Bathrooms</span>
+            <select name="minBaths">
+              <option value="0">Any</option>
+              <option value="1">1+</option>
+              <option value="1.5">1.5+</option>
+              <option value="2">2+</option>
+              <option value="2.5">2.5+</option>
+              <option value="3">3+</option>
+            </select>
+          </label>
+        </div>
+
+        <fieldset class="field">
+          <legend>What matters most</legend>
+          <div class="chips" id="priority-chips"></div>
+        </fieldset>
+
+        <fieldset class="field">
+          <legend>Must-haves</legend>
+          <div class="chips chips-sm" id="feature-chips"></div>
+        </fieldset>
+
+        <label class="field">
+          <span>Anything else?</span>
+          <textarea name="notes" rows="3" maxlength="400" placeholder="Two dogs, love hiking, want a quiet street…"></textarea>
+        </label>
+
+        <button class="btn btn-primary btn-block" type="submit">Get AI recommendations</button>
+        <button class="btn btn-ghost btn-block" type="reset">Clear filters</button>
+      </form>
+    </details>
+
+    <section class="results" aria-live="polite">
+      <div id="results-view">
+        <div id="summary"></div>
+        <div id="results-grid" class="grid"></div>
+      </div>
+      <div id="saved-view" hidden>
+        <div class="section-head">
+          <h2>Saved homes</h2>
+          <p class="muted">Tap the heart on any home to save it. Ask the AI to compare your saved homes.</p>
+        </div>
+        <div id="saved-grid" class="grid"></div>
+      </div>
+    </section>
+  </main>
+
+  <button id="chat-toggle" class="chat-fab" type="button" aria-controls="chat" aria-expanded="false">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v11H8l-4 4z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+    Ask AI
+  </button>
+
+  <aside id="chat" class="chat" hidden aria-label="AI assistant">
+    <header class="chat-head">
+      <div>
+        <strong>HomeMatch Assistant</strong>
+        <span class="muted small">Ask about the homes on screen</span>
+      </div>
+      <button id="chat-close" class="icon-btn" type="button" aria-label="Close chat">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      </button>
+    </header>
+    <div id="chat-log" class="chat-log"></div>
+    <form id="chat-form" class="chat-form" autocomplete="off">
+      <label for="chat-input" class="sr-only">Message</label>
+      <input id="chat-input" maxlength="1000" placeholder="Ask anything about these homes…">
+      <button class="btn btn-primary" type="submit">Send</button>
+    </form>
+  </aside>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
