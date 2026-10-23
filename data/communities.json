@@ -1,0 +1,184 @@
+[
+  {
+    "name": "Saadiyat Island",
+    "region": "Islands & waterfront",
+    "freehold": true,
+    "aliases": ["saadiyat", "sadiyat", "saadiyat beach", "cultural district", "mamsha"],
+    "projects": ["Mamsha Al Saadiyat", "Saadiyat Beach Villas", "Jawaher Saadiyat", "Saadiyat Lagoons", "Saadiyat Grove", "Soho Square"]
+  },
+  {
+    "name": "Al Reem Island",
+    "region": "Islands & waterfront",
+    "freehold": true,
+    "aliases": ["reem", "al reem", "reem island", "shams", "city of lights", "marina square", "najmat", "reem hills"],
+    "projects": ["Sun & Sky Towers", "Marina Square", "Gate Tower", "Najmat Abu Dhabi", "Reem Hills", "Makers District"]
+  },
+  {
+    "name": "Yas Island",
+    "region": "Islands & waterfront",
+    "freehold": true,
+    "aliases": ["yas", "yas island", "yas acres", "west yas", "waters edge", "water's edge", "ansam", "mayan", "sustainable city"],
+    "projects": ["Yas Acres", "West Yas", "Water's Edge", "Mayan", "Ansam", "The Sustainable City Yas", "Yas Golf Collection"]
+  },
+  {
+    "name": "Al Maryah Island",
+    "region": "Islands & waterfront",
+    "freehold": true,
+    "aliases": ["maryah", "al maryah", "adgm island", "sowwah", "al sowwah"],
+    "projects": ["Rosewood Residences", "Galleria Residences", "Al Maryah Vista"]
+  },
+  {
+    "name": "Al Raha Beach",
+    "region": "Mainland suburbs",
+    "freehold": true,
+    "aliases": ["raha beach", "al raha beach", "al bandar", "al muneera", "al zeina", "raha lofts", "al hadeel"],
+    "projects": ["Al Bandar", "Al Muneera", "Al Zeina", "Al Raha Lofts", "Al Hadeel"]
+  },
+  {
+    "name": "Al Raha Gardens",
+    "region": "Mainland suburbs",
+    "freehold": true,
+    "aliases": ["raha gardens", "al raha gardens"],
+    "projects": ["Al Raha Gardens"]
+  },
+  {
+    "name": "Al Reef",
+    "region": "Mainland suburbs",
+    "freehold": true,
+    "aliases": ["reef", "al reef", "reef villas", "reef downtown"],
+    "projects": ["Al Reef Villas", "Al Reef Downtown"]
+  },
+  {
+    "name": "Masdar City",
+    "region": "Mainland suburbs",
+    "freehold": true,
+    "aliases": ["masdar", "masdar city"],
+    "projects": ["Masdar City Residences", "Masdar Park Views"]
+  },
+  {
+    "name": "Al Ghadeer",
+    "region": "Abu Dhabi–Dubai corridor",
+    "freehold": true,
+    "aliases": ["ghadeer", "al ghadeer"],
+    "projects": ["Al Ghadeer"]
+  },
+  {
+    "name": "Hydra Village",
+    "region": "Abu Dhabi–Dubai corridor",
+    "freehold": true,
+    "aliases": ["hydra", "hydra village"],
+    "projects": ["Hydra Village"]
+  },
+  {
+    "name": "Al Shamkha",
+    "region": "Mainland suburbs",
+    "freehold": true,
+    "aliases": ["shamkha", "al shamkha", "alreeman", "al reeman"],
+    "projects": ["Alreeman"]
+  },
+  {
+    "name": "Al Hudayriyat Island",
+    "region": "Islands & waterfront",
+    "freehold": true,
+    "aliases": ["hudayriyat", "al hudayriyat", "nawayef"],
+    "projects": ["Nawayef Hudayriyat"]
+  },
+  {
+    "name": "Al Jubail Island",
+    "region": "Islands & waterfront",
+    "freehold": true,
+    "aliases": ["jubail", "al jubail", "jubail island"],
+    "projects": ["Jubail Island Villas"]
+  },
+  {
+    "name": "Ramhan Island",
+    "region": "Islands & waterfront",
+    "freehold": true,
+    "aliases": ["ramhan", "ramhan island"],
+    "projects": ["Ramhan Island Villas"]
+  },
+  {
+    "name": "Nurai Island",
+    "region": "Islands & waterfront",
+    "freehold": true,
+    "aliases": ["nurai", "nurai island"],
+    "projects": ["Nurai Beach Villas"]
+  },
+  {
+    "name": "Fahid Island",
+    "region": "Islands & waterfront",
+    "freehold": true,
+    "aliases": ["fahid", "fahid island"],
+    "projects": ["Fahid Beach Residences"]
+  },
+  {
+    "name": "Al Bateen",
+    "region": "Abu Dhabi Island",
+    "freehold": false,
+    "aliases": ["bateen", "al bateen", "bateen wharf"],
+    "projects": ["Bateen Villas", "Bateen Wharf Residences"]
+  },
+  {
+    "name": "Corniche & Al Khalidiyah",
+    "region": "Abu Dhabi Island",
+    "freehold": false,
+    "aliases": ["corniche", "khalidiyah", "al khalidiyah", "khalidiya", "etihad towers"],
+    "projects": ["Corniche Towers", "Khalidiyah Residences"]
+  },
+  {
+    "name": "Al Mushrif",
+    "region": "Abu Dhabi Island",
+    "freehold": false,
+    "aliases": ["mushrif", "al mushrif"],
+    "projects": ["Al Mushrif Villas"]
+  },
+  {
+    "name": "Khalifa City",
+    "region": "Mainland suburbs",
+    "freehold": false,
+    "aliases": ["khalifa city", "khalifa city a", "khalifa a", "kca"],
+    "projects": ["Khalifa City Villas"]
+  },
+  {
+    "name": "Mohammed Bin Zayed City",
+    "region": "Mainland suburbs",
+    "freehold": false,
+    "aliases": ["mbz", "mbz city", "mohammed bin zayed city", "mohamed bin zayed city"],
+    "projects": ["MBZ City Villas"]
+  },
+  {
+    "name": "Shakhbout City",
+    "region": "Mainland suburbs",
+    "freehold": false,
+    "aliases": ["shakhbout", "shakhbout city", "khalifa city b"],
+    "projects": ["Shakhbout City Villas"]
+  },
+  {
+    "name": "Baniyas",
+    "region": "Mainland suburbs",
+    "freehold": false,
+    "aliases": ["baniyas", "bani yas"],
+    "projects": ["Baniyas Villas"]
+  },
+  {
+    "name": "Zayed City",
+    "region": "Mainland suburbs",
+    "freehold": false,
+    "aliases": ["zayed city"],
+    "projects": ["Zayed City Villas"]
+  },
+  {
+    "name": "Al Zahiyah",
+    "region": "Abu Dhabi Island",
+    "freehold": false,
+    "aliases": ["zahiyah", "al zahiyah", "tourist club", "tourist club area"],
+    "projects": ["Al Zahiyah Towers"]
+  },
+  {
+    "name": "Al Ain",
+    "region": "Al Ain",
+    "freehold": false,
+    "aliases": ["al ain", "alain", "al jimi", "jimi", "hili", "al towayya", "towayya", "zakher", "al muwaiji"],
+    "projects": ["Al Jimi", "Al Towayya", "Hili", "Zakher", "Al Ain City Centre"]
+  }
+]

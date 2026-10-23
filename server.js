@@ -5,10 +5,9 @@ import { fileURLToPath } from 'node:url';
 import { loadEnv } from './src/env.js';
 import { HttpError } from './src/errors.js';
 import { aiConfig } from './src/groq.js';
-import {
-  CITIES, FEATURES, LOAN, PRIORITIES, TYPES, listings,
-} from './src/listings.js';
+import { GOLDEN_VISA_MIN, LOAN, listings } from './src/listings.js';
 import { chatAboutHomes, parseQuery, recommend } from './src/recommend.js';
+import { searchVocabulary } from './src/search.js';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 loadEnv(join(ROOT, '.env'));
@@ -18,6 +17,13 @@ const PORT = Number(process.env.PORT) || 3000;
 // Local-only by default: the API spends your Groq quota, so don't expose it to the network.
 const HOST = process.env.HOST || '127.0.0.1';
 const MAX_BODY_BYTES = 50_000;
+
+// Optional Google Maps browser key. Unlike the Groq key it is meant to be used in the browser,
+// so restrict it to your domain in Google Cloud. Without it the app uses keyless map embeds.
+function mapsConfig() {
+  const key = process.env.GOOGLE_MAPS_API_KEY || '';
+  return { key, mapId: process.env.GOOGLE_MAPS_MAP_ID || 'DEMO_MAP_ID' };
+}
 
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -30,12 +36,15 @@ const MIME_TYPES = {
 };
 
 const routes = {
-  'GET /api/health': () => ({ ok: true, ai: aiConfig() }),
+  'GET /api/health': () => ({ ok: true, ai: aiConfig(), maps: mapsConfig() }),
   'GET /api/listings': () => ({
-    listings, cities: CITIES, types: TYPES, features: FEATURES, priorities: PRIORITIES, loan: LOAN,
+    listings,
+    ...searchVocabulary(),
+    loan: LOAN,
+    goldenVisaMin: GOLDEN_VISA_MIN,
   }),
   'POST /api/recommend': (body) => recommend(body),
-  'POST /api/parse': (body) => parseQuery(body.query),
+  'POST /api/parse': (body) => parseQuery(body.query, body.current),
   'POST /api/chat': (body) => chatAboutHomes(body),
 };
 
@@ -81,7 +90,11 @@ async function serveStatic(res, pathname) {
 
   try {
     const data = await readFile(file);
-    res.writeHead(200, { 'Content-Type': MIME_TYPES[extname(file)] || 'application/octet-stream' });
+    res.writeHead(200, {
+      'Content-Type': MIME_TYPES[extname(file)] || 'application/octet-stream',
+      // Revalidate every time so edits to the frontend show up on a normal refresh.
+      'Cache-Control': 'no-cache',
+    });
     res.end(data);
   } catch {
     res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }).end('Not found');
@@ -114,4 +127,7 @@ server.listen(PORT, HOST, () => {
   console.log(configured
     ? `AI model: ${model}`
     : 'Warning: GROQ_API_KEY is not set, so AI features are off. Copy .env.example to .env and add your key.');
+  console.log(mapsConfig().key
+    ? 'Google Maps: interactive map enabled'
+    : 'Google Maps: using keyless embeds (set GOOGLE_MAPS_API_KEY for the interactive results map)');
 });

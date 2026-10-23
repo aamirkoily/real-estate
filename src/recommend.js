@@ -1,337 +1,315 @@
+// AI layer: understands requests, re-ranks the search engine's best matches and powers the chat.
+// Everything degrades gracefully: if the AI is busy, keyword parsing and rule-based ranking take over.
 import { chat, chatJSON } from './groq.js';
 import { HttpError } from './errors.js';
 import {
-  CITIES, FEATURES, LOAN, PRIORITIES, TYPES, compactListing, listings, listingsById,
+  COMMUNITIES, FEATURES, GOLDEN_VISA_MIN, LANDMARKS, LOAN, PRIORITIES, REGIONS, TYPES,
+  aed, compactListing, landmarksById, listingsById,
 } from './listings.js';
+import {
+  describePrefs, interpretPrefs, quickParse, sanitizePrefs, searchHomes,
+} from './search.js';
 
-const SHORTLIST_SIZE = 8; // homes sent to the AI
-const RESULT_COUNT = 6; // homes shown to the user
-const MIN_RESULTS = 3; // ...but never fewer than this
-const MIN_MATCH_SCORE = 35; // AI matches below this are hidden
+const AI_SHORTLIST = 8; // best rule-based matches sent to the AI
+const TOP_PICKS = 6; // explained by the AI
+const MORE_RESULTS = 18; // extra matches listed below the top picks
 const CHAT_CONTEXT_SIZE = 6;
 const CHAT_HISTORY_SIZE = 8;
-
-const usd = (n) => `$${Math.round(n).toLocaleString('en-US')}`;
-const clamp01 = (n) => Math.min(1, Math.max(0, n));
-const average = (nums) => nums.reduce((a, b) => a + b, 0) / nums.length;
-const joinList = (items) => (items.length < 3
-  ? items.join(' and ')
-  : `${items.slice(0, -1).join(', ')} and ${items.at(-1)}`);
-
-const withArticle = (noun) => `${/^[aeiou]/i.test(noun) ? 'an' : 'a'} ${noun.toLowerCase()}`;
 
 const cleanText = (value, max) => (typeof value === 'string' ? value.trim().slice(0, max) : '');
 const cleanList = (value, maxItems, maxLen = 120) => (Array.isArray(value)
   ? value.map((v) => cleanText(v, maxLen)).filter(Boolean).slice(0, maxItems)
   : []);
 
-// ---------------------------------------------------------------------------
-// Preferences
-// ---------------------------------------------------------------------------
-
-// Case-insensitive match of user/AI-supplied values onto our canonical vocabulary.
-function pickAllowed(values, allowed) {
-  if (!Array.isArray(values)) return [];
-  const lookup = new Map(allowed.map((a) => [a.toLowerCase(), a]));
-  return [...new Set(values.map((v) => lookup.get(String(v).trim().toLowerCase())).filter(Boolean))];
+// Small in-memory caches so repeated searches don't spend the free-tier token budget.
+function lruCache(limit) {
+  const map = new Map();
+  return {
+    get(key) {
+      if (!map.has(key)) return undefined;
+      const value = map.get(key);
+      map.delete(key);
+      map.set(key, value);
+      return value;
+    },
+    set(key, value) {
+      map.set(key, value);
+      if (map.size > limit) map.delete(map.keys().next().value);
+    },
+  };
 }
+const parseCache = lruCache(200);
+const rankCache = lruCache(200);
 
-function positive(value, max) {
-  const n = Number(value);
-  return Number.isFinite(n) && n > 0 ? Math.min(n, max) : 0;
-}
+// ---------------------------------------------------------------------------
+// Understanding the request
+// ---------------------------------------------------------------------------
 
-export function sanitizePrefs(input = {}) {
-  const prefs = input && typeof input === 'object' ? input : {};
-  const cityName = String(prefs.city ?? '').split(',')[0].trim().toLowerCase();
+const VOCABULARY = `Communities (with region): ${COMMUNITIES.map((c) => `${c.name} [${c.region}${c.freehold ? '' : ', nationals only'}]`).join('; ')}.
+Regions: ${REGIONS.join(', ')}.
+Landmarks for "near": ${LANDMARKS.map((l) => `${l.id} = ${l.name}`).join('; ')}.
+Types: ${TYPES.join(', ')}.
+Features: ${FEATURES.join(', ')}.
+Priorities: ${Object.keys(PRIORITIES).join(', ')}.`;
 
-  let minPrice = positive(prefs.minPrice, 100_000_000);
-  let maxPrice = positive(prefs.maxPrice, 100_000_000);
-  if (minPrice && maxPrice && minPrice > maxPrice) [minPrice, maxPrice] = [maxPrice, minPrice];
+const PARSE_RULES = `Return JSON with exactly these keys:
+{"mode":"new|refine","communities":[],"regions":[],"near":null or {"landmark":"landmark id","maxKm":10},"minPrice":0,"maxPrice":0,"budgetStrict":false,"types":[],"minBeds":0,"maxBeds":null,"minBaths":0,"minSqft":0,"completion":"ready|offplan|","freeholdOnly":false,"mustHaves":[],"niceToHaves":[],"priorities":[],"purpose":"live|invest|","notes":"","interpretation":"","followUp":"","unsupported":""}
+Rules:
+- Use only values from the lists above. Prices are AED: "3M" = 3000000, "900k" = 900000. "Under X" or "budget X" sets maxPrice only; "around X" sets minPrice 0.85X and maxPrice 1.1X.
+- budgetStrict is false unless they explicitly say it's a hard limit ("absolute max", "cannot exceed", "strictly").
+- Only set communities or regions when the buyer names an area. Never infer an area from a landmark, school or lifestyle - "near Cranleigh" sets near only.
+- mustHaves = things they clearly need ("must", "need", "has to", "with a", "has a"). niceToHaves = things they'd like ("would love", "would like", "ideally", "prefer", "bonus", "would be nice", "if possible"). When unsure, use niceToHaves - must-haves hide homes.
+- "near/close to/minutes from/work at" a landmark -> near (maxKm 8 for "walking distance", 10 default, 15 for "not too far", 25 for "within commuting distance"). If they name a community, use communities instead.
+- Expat, foreigner, non-UAE national, or wanting a Golden Visa -> freeholdOnly true (only freehold zones allow foreign ownership).
+- Family/kids -> priorities schools (+ Kids play area or Private garden as niceToHaves). Investment/rental income/ROI -> purpose invest + priority yield. "Cheap/good deal" -> value. Beach lifestyle -> beach. "Quiet" -> quiet.
+- "Studio" -> minBeds 0, maxBeds 0. "3 bed" -> minBeds 3. "3-4 bed" -> minBeds 3, maxBeds 4. "House" -> Villa or Townhouse. Unknown maxBeds -> null.
+- interpretation: one friendly sentence starting "You're looking for" summarizing what you understood.
+- followUp: if budget, bedrooms or area is missing, ONE short question that would most improve results, else "".
+- unsupported: anything they asked for that we can't search (another emirate/country, rentals, a place not listed), else "".`;
+
+// The AI sometimes adds requirements nobody asked for (an area, a strict budget). Hard filters hide
+// homes, so only keep them if the buyer's own words - or their existing filters - support them.
+function guardInvented(ai, text, current) {
+  const words = text.toLowerCase();
+  const mentioned = new Set([...quickParse(text).communities, ...(current?.communities || [])]);
+  const regionWords = {
+    'Abu Dhabi Island': /main island|abu dhabi island|on the island|city centre|downtown/,
+    'Islands & waterfront': /islands?\b|waterfront|beachfront/,
+    'Mainland suburbs': /mainland|suburb|off[- ]island/,
+    'Abu Dhabi–Dubai corridor': /dubai|border|corridor/,
+    'Al Ain': /al ?ain/,
+  };
+  // Features mentioned with soft wording ("would love a garden") are nice-to-haves, not hard filters.
+  const softClauses = words.split(/[,.;!?]|\band\b|\bbut\b/).filter((c) => /\b(love|ideally|prefer|preferably|would like|nice|if possible|bonus|wish|hopefully)\b/.test(c));
+  const soft = new Set(softClauses.flatMap((c) => quickParse(c).mustHaves));
+  const mustHaves = (Array.isArray(ai.mustHaves) ? ai.mustHaves : []).filter((f) => !soft.has(f));
+  const niceToHaves = [...new Set([...(Array.isArray(ai.niceToHaves) ? ai.niceToHaves : []),
+    ...(Array.isArray(ai.mustHaves) ? ai.mustHaves : []).filter((f) => soft.has(f))])];
 
   return {
-    city: CITIES.find((c) => c.city.toLowerCase() === cityName)?.city ?? '',
-    minPrice,
-    maxPrice,
-    types: pickAllowed(prefs.types, TYPES),
-    minBeds: Math.round(positive(prefs.minBeds, 10)),
-    minBaths: positive(prefs.minBaths, 10),
-    mustHaves: pickAllowed(prefs.mustHaves, FEATURES),
-    priorities: pickAllowed(prefs.priorities, Object.keys(PRIORITIES)),
-    notes: cleanText(prefs.notes, 400),
+    ...ai,
+    mustHaves,
+    niceToHaves,
+    communities: (Array.isArray(ai.communities) ? ai.communities : []).filter((c) => {
+      const name = String(c);
+      return [...mentioned].some((m) => m.toLowerCase() === name.toLowerCase());
+    }),
+    regions: (Array.isArray(ai.regions) ? ai.regions : []).filter((r) => (current?.regions || []).includes(r) || regionWords[r]?.test(words)),
+    budgetStrict: ai.budgetStrict === true && (current?.budgetStrict || /strict|absolute|cannot exceed|can'?t exceed|hard limit|not a dirham more|no more than|not more than/.test(words)),
   };
 }
 
-export function describePrefs(p) {
-  let budget = 'no limit';
-  if (p.minPrice && p.maxPrice) budget = `${usd(p.minPrice)} to ${usd(p.maxPrice)}`;
-  else if (p.maxPrice) budget = `up to ${usd(p.maxPrice)}`;
-  else if (p.minPrice) budget = `at least ${usd(p.minPrice)}`;
-
-  return [
-    `- City: ${p.city || 'any'}`,
-    `- Budget: ${budget}`,
-    `- Property type: ${p.types.join(', ') || 'any'}`,
-    `- Bedrooms: ${p.minBeds ? `${p.minBeds}+` : 'any'}; bathrooms: ${p.minBaths ? `${p.minBaths}+` : 'any'}`,
-    `- Must-haves: ${p.mustHaves.join(', ') || 'none'}`,
-    `- Priorities: ${p.priorities.map((k) => PRIORITIES[k]).join(', ') || 'none'}`,
-    `- Notes: ${p.notes || 'none'}`,
-  ].join('\n');
+function finishParse(prefsInput, ai = {}) {
+  const prefs = sanitizePrefs(prefsInput);
+  return {
+    prefs,
+    mode: ai.mode === 'refine' ? 'refine' : 'new',
+    interpretation: cleanText(ai.interpretation, 300) || `You're looking for ${interpretPrefs(prefs).replace(/^A /, 'a ')}`,
+    followUp: cleanText(ai.followUp, 200),
+    unsupported: cleanText(ai.unsupported, 120),
+  };
 }
 
-// ---------------------------------------------------------------------------
-// Rule-based scoring (fast pre-filter, and the fallback when AI is unavailable)
-// ---------------------------------------------------------------------------
+// Understands a request. With `current` prefs, follow-ups like "cheaper" or "add townhouses" refine them.
+export async function parseQuery(query, current) {
+  const text = cleanText(query, 500);
+  if (!text) throw new HttpError(400, 'Describe the home you are looking for first.');
+  const currentPrefs = current && typeof current === 'object' ? sanitizePrefs(current) : null;
 
-const medianPricePerSqft = (() => {
-  const byCity = {};
-  for (const l of listings) (byCity[l.city] ??= []).push(l.price / l.sqft);
-  return Object.fromEntries(Object.entries(byCity).map(([city, values]) => {
-    const sorted = values.sort((a, b) => a - b);
-    return [city, sorted[Math.floor(sorted.length / 2)]];
-  }));
-})();
+  const cacheKey = JSON.stringify([text.toLowerCase(), currentPrefs]);
+  const cached = parseCache.get(cacheKey);
+  if (cached) return cached;
 
-// Each priority maps a listing to 0..1 (1 = great), plus phrases for pros/cons.
-const priorityRules = {
-  schools: {
-    score: (l) => l.schoolRating / 10,
-    pro: (l) => `Strong schools (${l.schoolRating}/10)`,
-    con: (l) => `Schools rated ${l.schoolRating}/10`,
-  },
-  walkability: {
-    score: (l) => l.walkScore / 100,
-    pro: (l) => `Very walkable (Walk Score ${l.walkScore})`,
-    con: (l) => `Car-dependent (Walk Score ${l.walkScore})`,
-  },
-  commute: {
-    score: (l) => clamp01(1 - (l.commuteMinutes - 5) / 40),
-    pro: (l) => `Only ${l.commuteMinutes} min to downtown`,
-    con: (l) => `${l.commuteMinutes} min commute to downtown`,
-  },
-  space: {
-    score: (l) => clamp01(l.sqft / 3000),
-    pro: (l) => `Roomy at ${l.sqft.toLocaleString('en-US')} sqft`,
-    con: (l) => `Compact at ${l.sqft.toLocaleString('en-US')} sqft`,
-  },
-  value: {
-    score: (l) => {
-      const median = medianPricePerSqft[l.city];
-      return clamp01(0.5 + ((median - l.price / l.sqft) / median) * 1.5);
-    },
-    pro: (l) => `Good value at ${usd(l.price / l.sqft)}/sqft`,
-    con: (l) => `Pricey for the area (${usd(l.price / l.sqft)}/sqft)`,
-  },
-  newer: {
-    score: (l) => clamp01((l.yearBuilt - 1960) / 60),
-    pro: (l) => `Newer build (${l.yearBuilt})`,
-    con: (l) => `Older home (built ${l.yearBuilt})`,
-  },
-};
+  const context = currentPrefs
+    ? `The buyer already has these search filters:\n${JSON.stringify(currentPrefs)}\nIf the new message adjusts them (e.g. "cheaper", "add townhouses", "closer to ADGM", "what about Yas?"), return mode "refine" with the FULL updated filters. If it is a completely new search, return mode "new" with fresh filters.`
+    : 'This is a new search: return mode "new".';
 
-function scoreListing(l, p) {
-  const pros = [];
-  const cons = [];
-  let score = 0;
-
-  // Budget: 30 points
-  if (p.maxPrice && l.price > p.maxPrice) {
-    const over = (l.price - p.maxPrice) / p.maxPrice;
-    score += Math.max(0, 30 - over * 200);
-    cons.push(`${Math.max(1, Math.round(over * 100))}% over your max budget`);
-  } else {
-    score += p.minPrice && l.price < p.minPrice ? 24 : 30;
-    if (p.maxPrice) pros.push('Within your budget');
-  }
-
-  // Bedrooms: 15 points, bathrooms: 5 points
-  if (l.beds >= p.minBeds) {
-    score += 15;
-  } else {
-    const short = p.minBeds - l.beds;
-    score += short === 1 ? 5 : 0;
-    cons.push(`${short} fewer bedroom${short > 1 ? 's' : ''} than you want`);
-  }
-  if (l.baths >= p.minBaths) score += 5;
-  else cons.push('Fewer bathrooms than you want');
-
-  // Property type: 10 points
-  if (!p.types.length || p.types.includes(l.type)) score += 10;
-  else cons.push(`It's ${withArticle(l.type)}, not ${withArticle(p.types.join(' or '))}`);
-
-  // Must-haves: 20 points
-  if (p.mustHaves.length) {
-    const has = p.mustHaves.filter((f) => l.features.includes(f));
-    const missing = p.mustHaves.filter((f) => !l.features.includes(f));
-    score += (20 * has.length) / p.mustHaves.length;
-    if (has.length) pros.push(`Has ${joinList(has).toLowerCase()}`);
-    if (missing.length) cons.push(`No ${joinList(missing).toLowerCase()}`);
-  } else {
-    score += 20;
-  }
-
-  // Priorities: 20 points
-  if (p.priorities.length) {
-    const values = p.priorities.map((k) => priorityRules[k].score(l));
-    score += 20 * average(values);
-    p.priorities.forEach((k, i) => {
-      if (values[i] >= 0.75) pros.push(priorityRules[k].pro(l));
-      else if (values[i] < 0.35) cons.push(priorityRules[k].con(l));
+  try {
+    const ai = await chatJSON({
+      messages: [
+        { role: 'system', content: `You turn an Abu Dhabi home buyer's request into precise search filters. Respond with JSON only.\n${VOCABULARY}` },
+        { role: 'user', content: `${context}\n\nBuyer's message: "${text}"\n\n${PARSE_RULES}` },
+      ],
+      maxTokens: 1100,
+      temperature: 0,
     });
-  } else {
-    score += 12;
+    const result = finishParse(guardInvented(ai, text, currentPrefs), ai);
+    parseCache.set(cacheKey, result);
+    return result;
+  } catch (err) {
+    // AI busy or failed: fall back to keyword understanding so search still works.
+    console.warn(`AI parse failed, using keyword parser: ${err.message}`);
+    const quick = quickParse(text);
+    const merged = currentPrefs ? mergeRefinement(currentPrefs, quick) : quick;
+    return { ...finishParse(merged), mode: currentPrefs ? 'refine' : 'new', fallback: true };
   }
-
-  if (l.hoa >= 400) cons.push(`High HOA (${usd(l.hoa)}/mo)`);
-
-  return { score: Math.round(score), pros: pros.slice(0, 3), cons: cons.slice(0, 2) };
 }
 
-export function rankListings(prefs) {
-  const pool = prefs.city ? listings.filter((l) => l.city === prefs.city) : listings;
-  return pool
-    .map((listing) => ({ listing, ...scoreListing(listing, prefs) }))
-    .sort((a, b) => b.score - a.score);
-}
-
-function ruleSummary(prefs, results) {
-  if (!results.length) return 'No homes matched. Try another city or loosen your filters.';
-  const where = prefs.city ? ` in ${prefs.city}` : '';
-  const top = results[0];
-  if (top.matchScore < 60) {
-    return `Nothing${where} ticks every box, so these are the closest options. Try raising your budget or dropping a must-have.`;
+// Keyword-mode refinement: anything mentioned in the new message overrides the current filters.
+function mergeRefinement(current, quick) {
+  const merged = { ...current };
+  for (const [key, value] of Object.entries(quick)) {
+    const empty = value === '' || value === 0 || value === null || value === false || (Array.isArray(value) && !value.length);
+    if (!empty) merged[key] = value;
   }
-  return `Found ${results.length} homes${where} that fit your criteria. Top pick: ${top.listing.title}.`;
+  return merged;
 }
 
 // ---------------------------------------------------------------------------
-// AI features
+// Recommendations
 // ---------------------------------------------------------------------------
 
-const ADVISOR_PROMPT = `You are HomeMatch AI, a friendly and honest real estate advisor.
-You rank candidate homes for a buyer and explain the fit in plain, specific language.
+const ADVISOR_PROMPT = `You are HomeMatch AI, a friendly and honest Abu Dhabi real estate advisor.
+You re-rank pre-filtered candidate homes for a buyer and explain the fit in plain, specific language. Prices are in AED.
 Rules:
-- Use only the facts given for each home. Never invent features, prices or numbers.
+- Use only the facts on each home's own line. Never invent features, prices or numbers, and never mix up facts between homes.
+- Each line ends with pre-computed checks (requirements met, distance, must-haves). Trust them.
 - Be candid about real trade-offs for this buyer, but never manufacture one. An empty cons list is fine.
+- Write to the buyer directly ("you", "your budget"), never "the buyer". Keep each pro/con under 12 words.
 - Respond with JSON only.`;
 
-// Accepts {"recommendations": [...]}, a bare array, or the first array-valued key.
 function findRecommendations(ai) {
   if (Array.isArray(ai)) return ai;
   if (Array.isArray(ai?.recommendations)) return ai.recommendations;
   return Object.values(ai ?? {}).find(Array.isArray) ?? [];
 }
 
-export async function recommend(rawPrefs) {
-  const prefs = sanitizePrefs(rawPrefs);
-  const shortlist = rankListings(prefs).slice(0, SHORTLIST_SIZE);
-  const fallback = shortlist.slice(0, RESULT_COUNT).map((s) => ({
-    listing: s.listing, matchScore: s.score, headline: '', pros: s.pros, cons: s.cons,
-  }));
-
-  if (!shortlist.length) {
-    return { prefs, source: 'rules', summary: ruleSummary(prefs, []), results: [] };
+function checksFor(item, prefs) {
+  const l = item.listing;
+  const checks = [item.exact ? 'meets ALL hard requirements' : 'close match (some requirements relaxed)'];
+  if (prefs.maxPrice) {
+    checks.push(l.price <= prefs.maxPrice ? 'within budget' : `${Math.round(((l.price - prefs.maxPrice) / prefs.maxPrice) * 100)}% OVER budget`);
   }
-
-  const count = Math.min(RESULT_COUNT, shortlist.length);
-  const userPrompt = `Buyer preferences:
-${describePrefs(prefs)}
-
-Candidate homes:
-${shortlist.map((s) => compactListing(s.listing)).join('\n')}
-
-Pick the best ${count} homes for this buyer, best first.
-- matchScore is your own 0-100 judgment of overall fit: budget, size and type first, then must-haves, priorities and the buyer's notes. Going over budget, the wrong property type, too few bedrooms or a missing must-have should each cost real points.
-- Pros and cons must explain fit for THIS buyer (e.g. "9/10 schools, a top priority for you"). Don't just restate beds, baths or square footage - the card already shows them.
-- Cons are only things that work against what the buyer asked for (over budget, missing must-have, weak on a priority, high HOA, conflicts with their notes). Never list a missing feature they didn't ask for.
-Return JSON in exactly this shape:
-{"summary":"2-3 sentences: what you found and the main trade-off","recommendations":[{"id":"home id from the brackets","matchScore":0-100,"headline":"max 12 words on why it fits this buyer","pros":["up to 3 short points"],"cons":["up to 2 short points"]}]}`;
-
-  try {
-    const ai = await chatJSON({
-      messages: [
-        { role: 'system', content: ADVISOR_PROMPT },
-        { role: 'user', content: userPrompt },
-      ],
-      maxTokens: 2500,
-      temperature: 0.3,
-    });
-
-    const byId = new Map(shortlist.map((s) => [s.listing.id, s]));
-    const results = [];
-    for (const rec of findRecommendations(ai)) {
-      // Models sometimes echo the brackets from the prompt, e.g. "[aus-01]".
-      const id = String(rec?.id ?? rec?.homeId ?? '').replace(/[[\]\s]/g, '');
-      const match = byId.get(id);
-      if (!match) continue; // ignore unknown or duplicate ids
-      byId.delete(id);
-
-      const score = Number(rec.matchScore);
-      const pros = cleanList(rec.pros, 3);
-      const cons = cleanList(rec.cons, 2);
-      results.push({
-        listing: match.listing,
-        matchScore: Number.isFinite(score) ? Math.round(Math.min(100, Math.max(0, score))) : match.score,
-        headline: cleanText(rec.headline, 140),
-        pros: pros.length ? pros : match.pros,
-        cons: cons.length ? cons : match.cons,
-      });
-      if (results.length === count) break;
-    }
-    if (!results.length) {
-      console.warn(`Unusable AI ranking response: ${JSON.stringify(ai).slice(0, 800)}`);
-      throw new HttpError(502, 'The AI did not return usable recommendations.');
-    }
-    results.sort((a, b) => b.matchScore - a.matchScore); // stable, so ties keep the AI's order
-    // Hide very weak matches, but always show a few options.
-    const strong = results.filter((r) => r.matchScore >= MIN_MATCH_SCORE);
-
-    return {
-      prefs,
-      source: 'ai',
-      summary: cleanText(ai.summary, 700),
-      results: strong.length >= MIN_RESULTS ? strong : results.slice(0, MIN_RESULTS),
-    };
-  } catch (err) {
-    console.warn(`AI ranking failed, using rule-based results: ${err.message}`);
-    return {
-      prefs,
-      source: 'rules',
-      summary: ruleSummary(prefs, fallback),
-      warning: err instanceof HttpError ? err.message : 'AI ranking failed.',
-      results: fallback,
-    };
+  if (item.distanceKm !== null) checks.push(`${item.distanceKm} km from ${landmarksById.get(prefs.near.landmark).name}`);
+  if (prefs.mustHaves.length) {
+    const missing = prefs.mustHaves.filter((f) => !l.features.includes(f));
+    checks.push(`must-haves: ${missing.length ? `MISSING ${missing.join(', ')}` : 'all present'}`);
   }
+  if (prefs.niceToHaves.length) {
+    const nice = prefs.niceToHaves.filter((f) => l.features.includes(f));
+    checks.push(`nice-to-haves: ${nice.join(', ') || 'none'}`);
+  }
+  return checks;
 }
 
-// Turns "3 bed house in Austin under 600k with a yard" into structured filters.
-export async function parseQuery(query) {
-  const text = cleanText(query, 500);
-  if (!text) throw new HttpError(400, 'Describe the home you are looking for first.');
+const toResult = (item, extra = {}) => ({
+  listing: item.listing,
+  matchScore: item.score,
+  exact: item.exact,
+  distanceKm: item.distanceKm,
+  headline: '',
+  pros: item.pros,
+  cons: item.cons,
+  ...extra,
+});
 
+function ruleSummary(search) {
+  const { ranked, exactCount } = search;
+  if (!ranked.length) return 'No homes matched these requirements. Try one of the suggestions below.';
+  if (exactCount >= ranked.length) return `${exactCount} homes match everything you asked for. Here are the best fits.`;
+  if (exactCount) return `${exactCount} homes match everything you asked for, so we've added close matches too.`;
+  return 'Nothing matches every requirement, so these are the closest options.';
+}
+
+async function aiRank(search) {
+  const { prefs } = search;
+  const shortlist = search.ranked.slice(0, AI_SHORTLIST);
+  const cacheKey = JSON.stringify([prefs, shortlist.map((s) => s.listing.id)]);
+  const cached = rankCache.get(cacheKey);
+  if (cached) return cached;
+
+  const count = Math.min(TOP_PICKS, shortlist.length);
   const ai = await chatJSON({
     messages: [
-      { role: 'system', content: 'You convert a home buyer\'s request into search filters. Respond with JSON only.' },
+      { role: 'system', content: ADVISOR_PROMPT },
       {
         role: 'user',
-        content: `Request: "${text}"
+        content: `Buyer requirements:\n${describePrefs(prefs)}\n\nCandidate homes:\n${shortlist.map((s) => compactListing(s.listing, checksFor(s, prefs))).join('\n')}
 
-Allowed values:
-- city: one of ${CITIES.map((c) => c.city).join(', ')}, or "" if none is mentioned
-- types: any of ${TYPES.join(', ')}
-- mustHaves: any of ${FEATURES.join(', ')} (map synonyms, e.g. "yard" -> "Backyard", "dog" or "cat" -> "Pet friendly", "work from home" -> "Home office", "lake" -> "Waterfront")
-- priorities: any of ${Object.keys(PRIORITIES).join(', ')} (e.g. "good schools" -> schools, "walk to cafes" -> walkability, "close to work" -> commute, "cheap" or "good deal" -> value, "big" -> space, "new" -> newer)
-
-Return JSON: {"city":"","minPrice":0,"maxPrice":0,"types":[],"minBeds":0,"minBaths":0,"mustHaves":[],"priorities":[],"notes":"other wishes not captured above, as a short phrase, else empty","unsupportedCity":"a city they asked for that is NOT in the allowed list, else empty"}
-Use 0 for unknown numbers. "$600k" means 600000 and "1.2M" means 1200000. "Under X" sets only maxPrice.`,
+Pick the best ${count} homes for this buyer, best first.
+- matchScore is your 0-100 judgment of overall fit. Homes that meet all hard requirements should normally outrank relaxed ones; anything over budget or missing a must-have must lose real points.
+- Pros and cons must explain fit for THIS buyer (their priorities, purpose, notes and distance needs). Quote numbers exactly as on that home's line. Don't restate beds, baths or sqft.
+- Cons are only things that work against what they asked for. Never list a missing feature they didn't ask for.
+Return JSON exactly like:
+{"summary":"2-3 sentences: what you found, how many fully match, and the main trade-off","recommendations":[{"id":"home id from the brackets","matchScore":0-100,"headline":"max 12 words on why it fits this buyer","pros":["up to 3"],"cons":["up to 2"]}]}`,
       },
     ],
-    maxTokens: 1000,
-    temperature: 0,
+    maxTokens: 2600,
+    temperature: 0.2,
+    reasoningEffort: 'medium', // ranking is where accuracy matters most
   });
 
-  return { prefs: sanitizePrefs(ai), unsupportedCity: cleanText(ai.unsupportedCity, 60) };
+  const byId = new Map(shortlist.map((s) => [s.listing.id, s]));
+  const picks = [];
+  for (const rec of findRecommendations(ai)) {
+    const id = String(rec?.id ?? '').replace(/[[\]\s]/g, '');
+    const item = byId.get(id);
+    if (!item) continue; // unknown or duplicate id
+    byId.delete(id);
+    const score = Number(rec.matchScore);
+    const pros = cleanList(rec.pros, 3);
+    const cons = cleanList(rec.cons, 2);
+    picks.push(toResult(item, {
+      matchScore: Number.isFinite(score) ? Math.round(Math.min(100, Math.max(0, score))) : item.score,
+      headline: cleanText(rec.headline, 140),
+      pros: pros.length ? pros : item.pros,
+      cons: cons.length ? cons : item.cons,
+    }));
+    if (picks.length === count) break;
+  }
+  if (!picks.length) {
+    console.warn(`Unusable AI ranking response: ${JSON.stringify(ai).slice(0, 600)}`);
+    throw new HttpError(502, 'The AI did not return usable recommendations.');
+  }
+  // Never let the AI drop a home that meets every requirement in favour of a close match.
+  for (const item of byId.values()) {
+    if (item.exact) picks.push(toResult(item));
+  }
+  // Exact matches first, then by the AI's score (stable, so ties keep the AI's order).
+  picks.sort((a, b) => (b.exact - a.exact) || (b.matchScore - a.matchScore));
+  const result = { summary: cleanText(ai.summary, 700) || ruleSummary(search), picks: picks.slice(0, count) };
+  rankCache.set(cacheKey, result);
+  return result;
 }
+
+export async function recommend(rawPrefs) {
+  const search = searchHomes(rawPrefs);
+  const base = {
+    prefs: search.prefs,
+    interpretation: interpretPrefs(search.prefs),
+    exactCount: search.exactCount,
+    totalMatches: search.ranked.length,
+    relaxed: search.relaxed,
+    suggestions: search.suggestions,
+  };
+  if (!search.ranked.length) return { ...base, source: 'rules', summary: ruleSummary(search), results: [], more: [] };
+
+  let source = 'ai';
+  let summary;
+  let picks;
+  let warning;
+  try {
+    ({ summary, picks } = await aiRank(search));
+  } catch (err) {
+    console.warn(`AI ranking failed, using rule-based results: ${err.message}`);
+    source = 'rules';
+    summary = ruleSummary(search);
+    picks = search.ranked.slice(0, TOP_PICKS).map((item) => toResult(item));
+    warning = err instanceof HttpError ? err.message : 'AI ranking failed.';
+  }
+
+  const picked = new Set(picks.map((p) => p.listing.id));
+  const more = search.ranked
+    .filter((item) => !picked.has(item.listing.id))
+    .slice(0, MORE_RESULTS)
+    .map((item) => toResult(item));
+
+  return { ...base, source, summary, warning, results: picks, more };
+}
+
+// ---------------------------------------------------------------------------
+// Chat
+// ---------------------------------------------------------------------------
 
 export async function chatAboutHomes({ messages, listingIds, prefs } = {}) {
   const history = (Array.isArray(messages) ? messages : [])
@@ -345,21 +323,22 @@ export async function chatAboutHomes({ messages, listingIds, prefs } = {}) {
     .filter(Boolean)
     .slice(0, CHAT_CONTEXT_SIZE);
 
-  const system = `You are HomeMatch AI, a friendly, knowledgeable real estate assistant inside a home recommendation app.
+  const system = `You are HomeMatch AI, a friendly, knowledgeable Abu Dhabi real estate assistant inside a home recommendation app. Prices are in AED.
 
 Homes the buyer is looking at right now:
-${homes.length ? homes.map(compactListing).join('\n') : '(none yet - suggest they run a search)'}
+${homes.length ? homes.map((l) => compactListing(l)).join('\n') : '(none yet - suggest they run a search)'}
 
-Buyer preferences:
+Buyer requirements:
 ${describePrefs(sanitizePrefs(prefs))}
 
 Guidelines:
 - Keep answers under 120 words unless the buyer asks for more detail. Lead with the answer, then at most 4 short "- " bullet points. No tables, no headings, and don't repeat facts the buyer can already see on the listing cards.
 - Refer to homes by their title, never by the id in brackets.
-- Only state facts that appear above. If something is unknown (flood risk, exact taxes, condition), say so and suggest how to find out.
-- You can compare homes, explain trade-offs and suggest questions for a viewing.
-- For monthly cost, use the "est. $X/mo total" figure given for each home (mortgage at ${LOAN.downPayment * 100}% down, ${LOAN.annualRate * 100}% ${LOAN.years}-year fixed, plus HOA; excludes taxes and insurance). Don't calculate your own.
-- You are not a licensed financial or legal advisor; for mortgages, contracts or taxes, suggest confirming with a professional.
+- Only state facts that appear above. If something is unknown (exact payment plan, building condition, chiller costs), say so and suggest how to find out.
+- You can compare homes, explain trade-offs, suggest questions for a viewing, and explain Abu Dhabi buying basics: freehold investment zones (where all nationalities can buy) vs areas limited to UAE/GCC nationals, ready vs off-plan, service charges and rental yields.
+- For monthly cost, use the "est. AED X/mo total" figure given for each home (mortgage at ${LOAN.downPayment * 100}% down, ${LOAN.annualRate * 100}% over ${LOAN.years} years, plus service charge). Don't calculate your own.
+- Upfront costs in Abu Dhabi are roughly a 2% transfer/registration fee plus agency (~2%) and mortgage fees. Homes of ${aed(GOLDEN_VISA_MIN)}+ may qualify for a 10-year Golden Visa. Always say rules can change and should be confirmed with ADREC / the Department of Municipalities and Transport or the relevant authority.
+- You are not a licensed financial or legal advisor; for mortgages, contracts or visas, suggest confirming with a professional.
 - If asked about something unrelated to homes or real estate, briefly steer back.`;
 
   const reply = await chat({

@@ -3,62 +3,107 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>HomeMatch AI</title>
-  <meta name="description" content="AI-powered real estate recommendations that explain why each home fits you.">
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%234f46e5'/%3E%3Cpath d='M7 16 16 8l9 8v9H7z' fill='%23fff'/%3E%3Cpath d='M14 25v-6h4v6' fill='%234f46e5'/%3E%3C/svg%3E">
+  <title>HomeMatch AI · Abu Dhabi</title>
+  <meta name="description" content="AI-powered Abu Dhabi property search and recommendations with Google Maps, directions and honest pros and cons.">
+  <!-- Apply the saved theme before first paint so the page never flashes the wrong colours. -->
+  <script>
+    (function () {
+      var theme;
+      try { theme = localStorage.getItem('homematch:theme'); } catch (e) { /* storage blocked */ }
+      if (theme !== 'light' && theme !== 'dark') {
+        theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      }
+      document.documentElement.dataset.theme = theme;
+    })();
+  </script>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230d9488'/%3E%3Cpath d='M7 16 16 8l9 8v9H7z' fill='%23fff'/%3E%3Cpath d='M14 25v-6h4v6' fill='%230d9488'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
+  <div class="cursor-glow" aria-hidden="true"></div>
+  <div class="cursor-ring" aria-hidden="true"></div>
+
   <header class="topbar">
     <a class="brand" href="/">
       <span class="brand-mark" aria-hidden="true">
         <svg viewBox="0 0 32 32"><path d="M7 16 16 8l9 8v9H7z" fill="currentColor"/><path d="M14 25v-6h4v6" fill="var(--brand)"/></svg>
       </span>
       HomeMatch <span class="brand-ai">AI</span>
+      <span class="brand-region">ABU DHABI</span>
     </a>
     <nav class="tabs" aria-label="Views">
       <button class="tab is-active" data-view="results" type="button">Matches</button>
       <button class="tab" data-view="saved" type="button">Saved <span id="saved-count" class="count">0</span></button>
     </nav>
     <span id="ai-status" class="ai-status" title="AI status"><span class="dot"></span><span class="label">Connecting…</span></span>
+    <button id="theme-toggle" class="theme-toggle magnetic" type="button" aria-label="Switch to dark theme" title="Toggle light / dark theme">
+      <svg class="icon-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5" fill="currentColor"/><g stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></g></svg>
+      <svg class="icon-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5a8.5 8.5 0 1 0 11 11z" fill="currentColor"/></svg>
+    </button>
   </header>
 
   <section class="hero">
+    <div class="hero-blob blob-a" aria-hidden="true"></div>
+    <div class="hero-blob blob-b" aria-hidden="true"></div>
+    <svg class="hero-skyline" viewBox="0 0 1200 120" preserveAspectRatio="xMidYMax slice" aria-hidden="true">
+      <path d="M0 120V96h40V80h26v16h30V70h22v26h34V60h18v36h28V84h40v12h36V50l10-22 10 22v46h30V76h24v20h32V64h20v32h28V88h36v8h30V40h8V8l4-8 4 8v32h8v56h30V72h26v24h34V58h22v38h30V82h40v14h28V66h20v30h36V52l12-16 12 16v44h30V78h26v18h34V62h20v34h30V86h40v10h32V70h22v26h38V120z" fill="currentColor"/>
+    </svg>
     <div class="hero-inner">
-      <h1>Find a home that fits your life.</h1>
-      <p class="lede">Describe what you want in plain English. HomeMatch AI turns it into a search, ranks the best homes for you and explains every match.</p>
+      <p class="eyebrow">Abu Dhabi · Saadiyat · Reem · Yas · Al Raha · Khalifa City · Al Ain</p>
+      <h1>Find your home in Abu Dhabi.</h1>
+      <p class="lede">Tell us what you need in plain English: budget, bedrooms, where you work, school runs, freehold or not. HomeMatch AI filters every listing to your requirements, ranks the best fits and explains why.</p>
       <form id="ai-search" class="ai-search" autocomplete="off">
         <svg class="sparkle" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l1.9 5.6L19.5 9.5l-5.6 1.9L12 17l-1.9-5.6L4.5 9.5l5.6-1.9zM19 15l.9 2.6 2.6.9-2.6.9L19 22l-.9-2.6-2.6-.9 2.6-.9z" fill="currentColor"/></svg>
         <label for="ai-query" class="sr-only">Describe your ideal home</label>
-        <input id="ai-query" name="query" maxlength="500" placeholder="e.g. 3-bed house in Austin under $650k with a yard and good schools">
-        <button class="btn btn-primary" type="submit">Find matches</button>
+        <input id="ai-query" name="query" maxlength="500" placeholder="e.g. 3-bed villa near Cranleigh school, budget 6M, I'm an expat">
+        <button class="btn btn-primary magnetic" type="submit">Find matches</button>
       </form>
+      <p id="refine-hint" class="refine-hint" hidden>Refining your current search. Try "cheaper", "add townhouses" or "closer to ADGM". <button type="button" class="link-btn" data-action="new-search">Start a new search</button></p>
       <div class="examples" aria-label="Example searches">
-        <button class="example" type="button">Walkable condo in Seattle under $600k</button>
-        <button class="example" type="button">Family home in Raleigh with great schools and a big yard</button>
-        <button class="example" type="button">House with a pool in Phoenix, 4 beds, under $550k, I work from home</button>
-        <button class="example" type="button">Pet-friendly place near downtown Denver with a short commute</button>
+        <button class="example" type="button">4-bed family villa near Cranleigh school, budget 9M, I'm an expat</button>
+        <button class="example" type="button">Investment apartment on Reem under 1.5M with good rental yield</button>
+        <button class="example" type="button">Townhouse within 20 km of ADGM, ready to move, pet friendly, under 3.5M</button>
+        <button class="example" type="button">Off-plan villa on Saadiyat or Yas with a private pool</button>
+        <button class="example" type="button">5-bed villa with majlis and driver's room in Khalifa City, 3M to 5M</button>
       </div>
     </div>
   </section>
 
   <main class="layout">
     <details id="filters" class="filters card" open>
-      <summary><h2>Your preferences</h2><span class="summary-hint">Fine-tune the search</span></summary>
+      <summary><h2>Your requirements</h2><span class="summary-hint">Filled in from your search</span></summary>
       <form id="prefs-form">
-        <label class="field">
-          <span>City</span>
-          <select name="city"><option value="">Any city</option></select>
-        </label>
+        <fieldset class="field">
+          <legend>Area</legend>
+          <div id="area-picker" class="area-picker"></div>
+        </fieldset>
+
+        <div class="field-row field-row-near">
+          <label class="field">
+            <span>Near</span>
+            <select name="nearLandmark"><option value="">Anywhere</option></select>
+          </label>
+          <label class="field">
+            <span>Within</span>
+            <select name="nearKm">
+              <option value="3">3 km</option>
+              <option value="5">5 km</option>
+              <option value="10" selected>10 km</option>
+              <option value="15">15 km</option>
+              <option value="25">25 km</option>
+              <option value="40">40 km</option>
+            </select>
+          </label>
+        </div>
 
         <div class="field-row">
           <label class="field">
-            <span>Min price</span>
-            <input name="minPrice" type="number" min="0" step="10000" inputmode="numeric" placeholder="No min">
+            <span>Min price (AED)</span>
+            <input name="minPrice" type="number" min="0" step="50000" inputmode="numeric" placeholder="No min">
           </label>
           <label class="field">
-            <span>Max price</span>
-            <input name="maxPrice" type="number" min="0" step="10000" inputmode="numeric" placeholder="No max">
+            <span>Max price (AED)</span>
+            <input name="maxPrice" type="number" min="0" step="50000" inputmode="numeric" placeholder="No max">
           </label>
         </div>
 
@@ -69,28 +114,49 @@
 
         <div class="field-row">
           <label class="field">
-            <span>Bedrooms</span>
+            <span>Bedrooms from</span>
             <select name="minBeds">
-              <option value="0">Any</option>
-              <option value="1">1+</option>
-              <option value="2">2+</option>
-              <option value="3">3+</option>
-              <option value="4">4+</option>
-              <option value="5">5+</option>
+              <option value="0">Studio</option>
+              <option value="1">1</option>
+              <option value="2">2</option>
+              <option value="3">3</option>
+              <option value="4">4</option>
+              <option value="5">5</option>
+              <option value="6">6</option>
             </select>
           </label>
           <label class="field">
-            <span>Bathrooms</span>
-            <select name="minBaths">
-              <option value="0">Any</option>
-              <option value="1">1+</option>
-              <option value="1.5">1.5+</option>
-              <option value="2">2+</option>
-              <option value="2.5">2.5+</option>
-              <option value="3">3+</option>
+            <span>to</span>
+            <select name="maxBeds">
+              <option value="">Any</option>
+              <option value="0">Studio</option>
+              <option value="1">1</option>
+              <option value="2">2</option>
+              <option value="3">3</option>
+              <option value="4">4</option>
+              <option value="5">5</option>
+              <option value="6">6</option>
+              <option value="7">7</option>
             </select>
           </label>
         </div>
+
+        <div class="field-row">
+          <label class="field">
+            <span>Completion</span>
+            <select name="completion"><option value="">Any</option></select>
+          </label>
+          <label class="field">
+            <span>Buying to</span>
+            <select name="purpose"><option value="">Not sure</option></select>
+          </label>
+        </div>
+
+        <label class="switch">
+          <input type="checkbox" name="freeholdOnly">
+          <span class="switch-track" aria-hidden="true"></span>
+          <span><b>I'm an expat:</b> freehold only <small class="muted">(areas where all nationalities can buy)</small></span>
+        </label>
 
         <fieldset class="field">
           <legend>What matters most</legend>
@@ -104,18 +170,38 @@
 
         <label class="field">
           <span>Anything else?</span>
-          <textarea name="notes" rows="3" maxlength="400" placeholder="Two dogs, love hiking, want a quiet street…"></textarea>
+          <textarea name="notes" rows="3" maxlength="400" placeholder="Work in Mussafah, two kids, want a payment plan…"></textarea>
         </label>
 
-        <button class="btn btn-primary btn-block" type="submit">Get AI recommendations</button>
-        <button class="btn btn-ghost btn-block" type="reset">Clear filters</button>
+        <button class="btn btn-primary btn-block" type="submit">Find matching homes</button>
+        <button class="btn btn-ghost btn-block" type="reset">Clear requirements</button>
       </form>
     </details>
 
     <section class="results" aria-live="polite">
       <div id="results-view">
         <div id="summary"></div>
+        <div id="results-map-wrap" class="card results-map-wrap" hidden>
+          <div id="results-map" class="results-map" role="region" aria-label="Map of matching homes"></div>
+        </div>
         <div id="results-grid" class="grid"></div>
+        <section id="more-section" class="more-section" hidden>
+          <div class="more-head">
+            <h2 id="more-title">More homes that match</h2>
+            <label class="sort">
+              <span>Sort by</span>
+              <select id="more-sort">
+                <option value="match">Best match</option>
+                <option value="price-asc">Price: low to high</option>
+                <option value="price-desc">Price: high to low</option>
+                <option value="yield">Rental yield</option>
+                <option value="size">Size</option>
+                <option value="distance">Distance</option>
+              </select>
+            </label>
+          </div>
+          <div id="more-grid" class="grid"></div>
+        </section>
       </div>
       <div id="saved-view" hidden>
         <div class="section-head">
@@ -124,10 +210,47 @@
         </div>
         <div id="saved-grid" class="grid"></div>
       </div>
+      <p class="disclaimer">Sample listings for demonstration: prices, details and photos are illustrative. Area photos from Wikimedia Commons (credited on each home). Not financial or legal advice.</p>
     </section>
   </main>
 
-  <button id="chat-toggle" class="chat-fab" type="button" aria-controls="chat" aria-expanded="false">
+  <dialog id="map-dialog" class="map-dialog" aria-labelledby="map-title">
+    <div class="map-dialog-inner">
+      <header class="map-head">
+        <div>
+          <h2 id="map-title">Location</h2>
+          <p id="map-subtitle" class="muted small"></p>
+        </div>
+        <button class="icon-btn" type="button" data-close-dialog aria-label="Close map">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        </button>
+      </header>
+      <div class="map-modes" role="tablist" aria-label="Map view">
+        <button class="map-mode is-active" type="button" data-mode="place">Location</button>
+        <button class="map-mode" type="button" data-mode="directions">Directions</button>
+        <button class="map-mode" type="button" data-mode="nearby" data-query="schools">Schools</button>
+        <button class="map-mode" type="button" data-mode="nearby" data-query="supermarkets">Supermarkets</button>
+        <button class="map-mode" type="button" data-mode="nearby" data-query="metro station">Metro</button>
+        <button class="map-mode" type="button" data-mode="nearby" data-query="hospitals">Hospitals</button>
+        <button class="map-mode" type="button" data-mode="nearby" data-query="beaches">Beaches</button>
+      </div>
+      <div class="map-frame">
+        <iframe id="map-frame" title="Google Map" loading="lazy" referrerpolicy="no-referrer-when-downgrade" allowfullscreen></iframe>
+      </div>
+      <form id="directions-form" class="directions-form" autocomplete="off">
+        <label for="directions-from" class="sr-only">Starting point</label>
+        <input id="directions-from" maxlength="200" placeholder="From: your office, e.g. Dubai Internet City">
+        <button class="btn btn-primary" type="submit">Get directions</button>
+        <button id="use-location" class="btn btn-outline" type="button">Use my location</button>
+      </form>
+      <footer class="map-foot">
+        <a id="open-gmaps" class="btn btn-ghost btn-sm" target="_blank" rel="noopener">Open in Google Maps ↗</a>
+        <a id="open-directions" class="btn btn-ghost btn-sm" target="_blank" rel="noopener">Navigate with Google Maps ↗</a>
+      </footer>
+    </div>
+  </dialog>
+
+  <button id="chat-toggle" class="chat-fab magnetic" type="button" aria-controls="chat" aria-expanded="false">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v11H8l-4 4z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
     Ask AI
   </button>
